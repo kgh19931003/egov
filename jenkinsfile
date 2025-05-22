@@ -1,0 +1,77 @@
+pipeline {
+    agent any
+
+    environment {
+        DEPLOY_BRANCH = 'main'
+        SERVER_USER = 'ubuntu'
+        SERVER_HOST = 'your.server.com'
+        SERVER_PATH = '/var/www/your-app'
+        SSH_KEY_CREDENTIALS_ID = 'your-ssh-credentials-id'  // Jenkins에 등록한 SSH key ID
+    }
+
+    options {
+        skipDefaultCheckout(false)  // Git checkout 허용
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                // GitHub에서 소스 체크아웃
+                checkout scm
+            }
+        }
+
+        stage('Check for Changes') {
+            steps {
+                script {
+                    // 변경된 파일 목록 가져오기
+                    def changeLogSets = currentBuild.changeSets
+                    def changes = []
+
+                    for (changeSet in changeLogSets) {
+                        for (entry in changeSet.items) {
+                            for (file in entry.affectedFiles) {
+                                changes << file.path
+                            }
+                        }
+                    }
+
+                    if (changes.size() == 0) {
+                        echo "No changes detected. Skipping deployment."
+                        currentBuild.result = 'SUCCESS'
+                        // 빌드 중단
+                        error("No changes to deploy")
+                    } else {
+                        echo "Changed files:"
+                        changes.each { echo "- ${it}" }
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to Production') {
+            when {
+                branch 'main'  // 실서버는 main 브랜치일 때만
+            }
+            steps {
+                echo "Deploying to production server..."
+
+                // 예시: Rsync로 배포
+                sshagent (credentials: ["${SSH_KEY_CREDENTIALS_ID}"]) {
+                    sh """
+                    rsync -avz --delete ./ ${SERVER_USER}@${SERVER_HOST}:${SERVER_PATH}
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        failure {
+            echo "Build or deployment failed!"
+        }
+        success {
+            echo "Deployment successful!"
+        }
+    }
+}
